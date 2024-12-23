@@ -7,10 +7,10 @@ class Config(object):
     # sucks Dude
     APP_ID = int(get_config("APP_ID", "26387127"))
     API_HASH = get_config("API_HASH", "19718ab7acd97d0f71ada2807ddfe47a")
-    LOG_CHANNEL = get_config("LOG_CHANNEL", "About_Yae_Miko_Warlord")
+    LOG_CHANNEL = get_config("LOG_CHANNEL", "krishna_bios")
     UPDATES_CHANNEL = get_config("UPDATES_CHANNEL", None) # Without `@` LOL
      # Get these values from my.telegram.org
-    AUTH_USERS = [5446367898, 5446367898, 5446367898]
+    AUTH_USERS = [5446367898]
 # array , simplest method was AUTH_USERS = [] ; AUTH_USERS.append(your telegram id) 🌹
     TG_BOT_TOKEN = get_config("TG_BOT_TOKEN", "7392080057:AAG2y7_qVNOfKH1b9FfMaI7o6HBa-uQetqM")
     # the download location, where the HTTP Server runs
