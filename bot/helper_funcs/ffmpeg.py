@@ -131,7 +131,7 @@ async def convert_video(video_file, output_directory, total_time, bot, message, 
     r = stderr.decode()
     try:
         if er:
-           await message.edit_text(str(er) + "\n<blockquote> Eʀʀᴏʀ...🔧 Cᴏɴᴛᴀᴄᴛ @cmd_rulf</blockquote>")
+           await message.edit_text(str(er) + "\n<blockquote> Eʀʀᴏʀ...🔧 Cᴏɴᴛᴀᴄᴛ @Krishna99887722</blockquote>")
            os.remove(videofile)
            os.remove(out_put_file_name)
            return None
