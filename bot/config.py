@@ -13,7 +13,7 @@ class Config(object):
       # Get these values from my.telegram.org
     AUTH_USERS = set(
         int(x) for x in get_config(
-            "AUTH_USERS", "-1002136866707 8154074711 5984303934 1852362865 5449069015 5066042764 7533047591").split()
+            "AUTH_USERS", "-1002136866707 8154074711 5984303934 1852362865 5449069015 5066042764 7533047591 5045662848 6680407688 7354647629").split()
     ) 
     TG_BOT_TOKEN = get_config("TG_BOT_TOKEN", "8439914112:AAEA7493ytK2R32y49rqjOXqMhgB6Gzch0I")
     # the download location, where the HTTP Server runs
