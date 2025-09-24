@@ -7,15 +7,15 @@ class Config(object):
     # sucks Dude
     APP_ID = int(get_config("APP_ID", "26387127"))
     API_HASH = get_config("API_HASH", "19718ab7acd97d0f71ada2807ddfe47a")
-    LOG_CHANNEL = get_config("LOG_CHANNEL", "Sheikhhasinarthemodhirbow")
+    LOG_CHANNEL = get_config("LOG_CHANNEL", "Animes_Wine")
     UPDATES_CHANNEL = get_config("UPDATES_CHANNEL", None) # Without `@` LOL
      # Get these values from my.telegram.org
       # Get these values from my.telegram.org
     AUTH_USERS = set(
         int(x) for x in get_config(
-            "AUTH_USERS", "-1002136866707 8154074711 5984303934 1852362865 5449069015 5066042764 7533047591 5045662848 6680407688 7354647629").split()
+            "AUTH_USERS", "-1002945128480 8154074711 5984303934 1852362865 5449069015 5066042764 7533047591 5045662848 6680407688 7354647629").split()
     ) 
-    TG_BOT_TOKEN = get_config("TG_BOT_TOKEN", "8439914112:AAEA7493ytK2R32y49rqjOXqMhgB6Gzch0I")
+    TG_BOT_TOKEN = get_config("TG_BOT_TOKEN", "8358334039:AAEf8yZKipU18h_C1_Fe8kFnd6Ba9Rt7dIU")
     # the download location, where the HTTP Server runs
     DOWNLOAD_LOCATION = get_config("DOWNLOAD_LOCATION", "/app/downloads")
     # Telegram maximum file upload size
