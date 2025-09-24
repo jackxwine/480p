@@ -49,7 +49,7 @@ async def incoming_start_message_f(bot, update):
         reply_markup=InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton('👨‍💻 Oᴡɴᴇʀ 👨‍💻', url='https://t.me/Itz_Sizian')
+                    InlineKeyboardButton('ᴄʀᴇᴀᴛᴏʀ', url='https://t.me/Team_Wine')
                 ]
             ]
         ),
