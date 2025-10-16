@@ -82,7 +82,7 @@ if __name__ == "__main__" :
     
     @app.on_message(filters.incoming & filters.command(["crf", f"crf@{BOT_USERNAME}"]))
     async def changecrf(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             cr = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {cr} crf</blockquote>"
             crf.insert(0, f"{cr}")
@@ -93,7 +93,7 @@ if __name__ == "__main__" :
 
     @app.on_message(filters.incoming & filters.command(["resolution", f"resolution@{BOT_USERNAME}"]))
     async def changer(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             r = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {r} </blockquote>"
             resolution.insert(0, f"{r}")
@@ -104,7 +104,7 @@ if __name__ == "__main__" :
                
     @app.on_message(filters.incoming & filters.command(["preset", f"preset@{BOT_USERNAME}"]))
     async def changepr(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             pop = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {pop} preset</blockquote>"
             preset.insert(0, f"{pop}")
@@ -115,7 +115,7 @@ if __name__ == "__main__" :
             
     @app.on_message(filters.incoming & filters.command(["codec", f"codec@{BOT_USERNAME}"]))
     async def changecode(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             col = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {col} codec</blockquote>"
             codec.insert(0, f"{col}")
@@ -125,7 +125,7 @@ if __name__ == "__main__" :
              
     @app.on_message(filters.incoming & filters.command(["audio", f"audio@{BOT_USERNAME}"]))
     async def changea(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             aud = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {aud} audio</blockquote>"
             audio_b.insert(0, f"{aud}")
@@ -146,7 +146,7 @@ if __name__ == "__main__" :
  
     @app.on_message(filters.incoming & filters.command(["restart", f"restart@{BOT_USERNAME}"]))
     async def restarter(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             await message.reply_text("Rᴇꜱᴛᴀʀᴛɪɴɢ...♻️")
             quit(1)
         else:
@@ -173,14 +173,14 @@ if __name__ == "__main__" :
 
     @app.on_message(filters.incoming & filters.command(["settings", f"settings@{BOT_USERNAME}"]))
     async def settings(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             await message.reply_text(f"<b>Tʜᴇ Cᴜʀʀᴇɴᴛ Sᴇᴛᴛɪɴɢꜱ ᴡɪʟʟ ʙᴇ Aᴅᴅᴇᴅ Yᴏᴜʀ Vɪᴅᴇᴏ Fɪʟᴇ ⚙️:</b>\n<blockquote><b>➥ Codec</b> : {codec[0]} \n<b>➥ Crf</b> : {crf[0]} \n<b>➥ Resolution</b> : {resolution[0]} \n<b>➥ Preset</b> : {preset[0]} \n<b>➥ Audio Bitrates</b> : {audio_b[0]}</blockquote>\n<b>🥇 Tʜᴇ Aʙɪʟɪᴛʏ ᴛᴏ Cʜᴀɴɢᴇ Sᴇᴛᴛɪɴɢꜱ ɪꜱ Oɴʟʏ ꜰᴏʀ Aᴅᴍɪɴ</b>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
             
     @app.on_message(filters.incoming & filters.command(["sysinfo", f"sysinfo@{BOT_USERNAME}"]))
     async def help_message(app, message):
-        if message.from_user.id in AUTH_USERS:
+        if message.chat.id in AUTH_USERS:  # Changed to chat.id
             await sysinfo(message)
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
@@ -208,6 +208,7 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["log", f"log@{BOT_USERNAME}"]))
     async def help_message(app, message):
         await upload_log_file(app, message)
+        
     @app.on_message(filters.incoming & filters.command(["ping", f"ping@{BOT_USERNAME}"]))
     async def up(app, message):
       stt = dt.now()
