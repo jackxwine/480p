@@ -13,9 +13,9 @@ class Config(object):
       # Get these values from my.telegram.org
     AUTH_USERS = set(
         int(x) for x in get_config(
-            "AUTH_USERS", "7219138626 5449069015").split()
+            "AUTH_USERS", "-1002667980568").split()
     ) 
-    TG_BOT_TOKEN = get_config("TG_BOT_TOKEN", "8376362821:AAFTFilObnqQsHNLk_smFg-f6o_b78YZPQc")
+    TG_BOT_TOKEN = get_config("TG_BOT_TOKEN", "8210912297:AAFr1DmWivimHq3fCRY-WU4vr1RLqgihafQ")
     # the download location, where the HTTP Server runs
     DOWNLOAD_LOCATION = get_config("DOWNLOAD_LOCATION", "/app/downloads")
     # Telegram maximum file upload size
