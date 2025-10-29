@@ -1,12 +1,17 @@
 import os
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure, OperationFailure
+from pymongo.errors import ConnectionFailure, OperationFailure, ServerSelectionTimeoutError
 import logging
 from typing import Dict, Optional, Any, List
 from bson import ObjectId
-import logging
-logging.basicConfig(level=logging.DEBUG)
+from datetime import datetime
+import ssl
 
+# Configure logging properly
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 class MongoDB:
@@ -16,41 +21,89 @@ class MongoDB:
         self.connect()
 
     def connect(self):
-        """Connect to MongoDB"""
+        """Connect to MongoDB with proper error handling"""
         try:
             # Get MongoDB URI from environment variable or use default
             mongodb_uri = os.getenv('MONGODB_URI', 'mongodb+srv://Wukong:MbTpYRQbVO2lUd1Z@cluster0.nlh7zf4.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
             database_name = os.getenv('MONGODB_DB_NAME', 'Soloflix_Encoder')
             
-            self.client = MongoClient(mongodb_uri)
+            logger.info(f"Attempting to connect to MongoDB database: {database_name}")
+            
+            # Connection options for better stability
+            self.client = MongoClient(
+                mongodb_uri,
+                serverSelectionTimeoutMS=10000,  # 10 second timeout
+                connectTimeoutMS=30000,          # 30 second connection timeout
+                socketTimeoutMS=30000,           # 30 second socket timeout
+                retryWrites=True,
+                ssl=True,
+                ssl_cert_reqs=ssl.CERT_NONE      # For Atlas connections
+            )
+            
+            # Test connection with timeout
+            self.client.admin.command('ping')
             self.db = self.client[database_name]
             
-            # Test connection
-            self.client.admin.command('ping')
-            logger.info("Connected to MongoDB successfully")
+            logger.info("✅ Connected to MongoDB successfully")
             
+            # Test database access
+            collections = self.db.list_collection_names()
+            logger.info(f"Available collections: {collections}")
+            
+        except ServerSelectionTimeoutError as e:
+            logger.error(f"❌ MongoDB server selection timeout: {e}")
+            raise
         except ConnectionFailure as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
+            logger.error(f"❌ Failed to connect to MongoDB: {e}")
+            raise
+        except OperationFailure as e:
+            logger.error(f"❌ MongoDB operation failed: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Unexpected error connecting to MongoDB: {e}")
             raise
 
     def get_collection(self, collection_name: str):
         """Get a collection from database"""
+        if self.db is None:
+            raise ConnectionError("Database not connected")
         return self.db[collection_name]
+
+    def is_connected(self) -> bool:
+        """Check if MongoDB is connected"""
+        try:
+            if self.client:
+                self.client.admin.command('ping')
+                return True
+            return False
+        except:
+            return False
 
 class UserSettingsDB:
     def __init__(self):
-        self.mongo = MongoDB()
-        self.collection = self.mongo.get_collection('user_settings')
-        self._ensure_indexes()
+        self.mongo = None
+        self.collection = None
+        self._initialize_database()
+
+    def _initialize_database(self):
+        """Initialize database connection and collection"""
+        try:
+            self.mongo = MongoDB()
+            self.collection = self.mongo.get_collection('user_settings')
+            self._ensure_indexes()
+            logger.info("✅ UserSettingsDB initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize UserSettingsDB: {e}")
+            raise
 
     def _ensure_indexes(self):
         """Create necessary indexes for better performance"""
         try:
             self.collection.create_index("user_id", unique=True)
             self.collection.create_index("updated_at")
-            logger.info("Database indexes ensured")
+            logger.info("✅ Database indexes ensured")
         except Exception as e:
-            logger.error(f"Error creating indexes: {e}")
+            logger.error(f"❌ Error creating indexes: {e}")
 
     # Default settings
     DEFAULT_SETTINGS = {
@@ -72,34 +125,52 @@ class UserSettingsDB:
         "original": {"resolution": "original", "crf": "28", "audio": "40k"}
     }
 
+    def _check_connection(self):
+        """Check and reestablish connection if needed"""
+        if not self.mongo or not self.mongo.is_connected():
+            logger.warning("Database connection lost, reconnecting...")
+            self._initialize_database()
+
     def get_user_settings(self, user_id: int) -> Dict[str, Any]:
         """Get user settings from database"""
+        self._check_connection()
+        
         try:
+            logger.debug(f"Fetching settings for user {user_id}")
             settings = self.collection.find_one({"user_id": user_id})
             
             if settings:
                 # Remove MongoDB _id field and return
-                settings.pop('_id', None)
-                return settings
+                settings_dict = dict(settings)
+                settings_dict.pop('_id', None)
+                logger.debug(f"Found existing settings for user {user_id}")
+                return settings_dict
             else:
                 # Return default settings if user doesn't exist
+                logger.debug(f"No settings found for user {user_id}, returning defaults")
                 return self._create_default_settings(user_id)
                 
         except Exception as e:
-            logger.error(f"Error getting user settings for {user_id}: {e}")
+            logger.error(f"❌ Error getting user settings for {user_id}: {e}")
             return self._create_default_settings(user_id)
 
     def _create_default_settings(self, user_id: int) -> Dict[str, Any]:
         """Create default settings for a user"""
         default_settings = self.DEFAULT_SETTINGS.copy()
         default_settings['user_id'] = user_id
+        default_settings['created_at'] = self._get_current_timestamp()
+        default_settings['updated_at'] = self._get_current_timestamp()
         return default_settings
 
     def update_user_settings(self, user_id: int, **kwargs) -> bool:
         """Update user settings in database"""
+        self._check_connection()
+        
         try:
             # Prepare update data
             update_data = {**kwargs, 'updated_at': self._get_current_timestamp()}
+            
+            logger.debug(f"Updating settings for user {user_id}: {update_data}")
             
             result = self.collection.update_one(
                 {"user_id": user_id},
@@ -114,12 +185,13 @@ class UserSettingsDB:
             )
             
             if result.acknowledged:
-                logger.info(f"Settings updated for user {user_id}")
+                logger.info(f"✅ Settings updated for user {user_id}")
                 return True
+            logger.warning(f"⚠️ Settings update not acknowledged for user {user_id}")
             return False
             
         except Exception as e:
-            logger.error(f"Error updating settings for user {user_id}: {e}")
+            logger.error(f"❌ Error updating settings for user {user_id}: {e}")
             return False
 
     def update_single_setting(self, user_id: int, setting_name: str, setting_value: Any) -> bool:
@@ -129,6 +201,7 @@ class UserSettingsDB:
     def update_quality_profile(self, user_id: int, quality: str) -> bool:
         """Update user settings based on quality profile"""
         if quality not in self.QUALITY_PROFILES:
+            logger.error(f"❌ Invalid quality profile: {quality}")
             return False
             
         profile = self.QUALITY_PROFILES[quality]
@@ -142,6 +215,7 @@ class UserSettingsDB:
         if profile['resolution'] != 'original':
             update_data['resolution'] = profile['resolution']
         
+        logger.info(f"Updating quality profile to {quality} for user {user_id}")
         return self.update_user_settings(user_id, **update_data)
 
     def get_user_setting(self, user_id: int, setting_name: str, default: Any = None) -> Any:
@@ -151,37 +225,50 @@ class UserSettingsDB:
 
     def delete_user_settings(self, user_id: int) -> bool:
         """Delete user settings from database"""
+        self._check_connection()
+        
         try:
             result = self.collection.delete_one({"user_id": user_id})
             if result.deleted_count > 0:
-                logger.info(f"Settings deleted for user {user_id}")
+                logger.info(f"✅ Settings deleted for user {user_id}")
                 return True
+            logger.warning(f"⚠️ No settings found to delete for user {user_id}")
             return False
             
         except Exception as e:
-            logger.error(f"Error deleting settings for user {user_id}: {e}")
+            logger.error(f"❌ Error deleting settings for user {user_id}: {e}")
             return False
 
     def get_all_users(self) -> List[int]:
         """Get all user IDs from database"""
+        self._check_connection()
+        
         try:
             users = self.collection.find({}, {"user_id": 1})
-            return [user['user_id'] for user in users]
+            user_ids = [user['user_id'] for user in users]
+            logger.debug(f"Found {len(user_ids)} users in database")
+            return user_ids
             
         except Exception as e:
-            logger.error(f"Error getting all users: {e}")
+            logger.error(f"❌ Error getting all users: {e}")
             return []
 
     def get_users_count(self) -> int:
         """Get total number of users in database"""
+        self._check_connection()
+        
         try:
-            return self.collection.count_documents({})
+            count = self.collection.count_documents({})
+            logger.debug(f"Total users in database: {count}")
+            return count
         except Exception as e:
-            logger.error(f"Error getting users count: {e}")
+            logger.error(f"❌ Error getting users count: {e}")
             return 0
 
     def get_user_stats(self, user_id: int) -> Dict[str, Any]:
         """Get user statistics and settings"""
+        self._check_connection()
+        
         try:
             settings = self.collection.find_one(
                 {"user_id": user_id},
@@ -199,24 +286,67 @@ class UserSettingsDB:
             )
             
             if settings:
-                settings.pop('_id', None)
-                return settings
+                settings_dict = dict(settings)
+                settings_dict.pop('_id', None)
+                return settings_dict
             return {}
             
         except Exception as e:
-            logger.error(f"Error getting user stats for {user_id}: {e}")
+            logger.error(f"❌ Error getting user stats for {user_id}: {e}")
             return {}
 
     def _get_current_timestamp(self):
         """Get current timestamp"""
-        from datetime import datetime
         return datetime.utcnow()
 
     def close_connection(self):
         """Close MongoDB connection"""
-        if self.mongo.client:
+        if self.mongo and self.mongo.client:
             self.mongo.client.close()
-            logger.info("MongoDB connection closed")
+            logger.info("✅ MongoDB connection closed")
 
-# Global instance
-user_db = UserSettingsDB()
+# Test function to verify everything works
+def test_database_connection():
+    """Test the database connection and basic operations"""
+    try:
+        logger.info("🧪 Testing database connection...")
+        
+        # Initialize database
+        db = UserSettingsDB()
+        
+        # Test user ID
+        test_user_id = -1003180650405
+        
+        # Test getting settings
+        settings = db.get_user_settings(test_user_id)
+        logger.info(f"📋 User settings: {settings}")
+        
+        # Test updating settings
+        success = db.update_user_settings(test_user_id, quality="1080p", crf="24")
+        logger.info(f"📝 Update successful: {success}")
+        
+        # Test getting updated settings
+        updated_settings = db.get_user_settings(test_user_id)
+        logger.info(f"📋 Updated settings: {updated_settings}")
+        
+        # Test counting users
+        user_count = db.get_users_count()
+        logger.info(f"👥 Total users: {user_count}")
+        
+        db.close_connection()
+        logger.info("✅ All tests completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ Test failed: {e}")
+
+# Global instance with error handling
+try:
+    user_db = UserSettingsDB()
+    logger.info("✅ Global UserSettingsDB instance created successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to create global UserSettingsDB instance: {e}")
+    user_db = None
+
+# Run tests if this file is executed directly
+if __name__ == "__main__":
+    test_database_connection()
