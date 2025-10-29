@@ -17,8 +17,8 @@ class MongoDB:
         """Connect to MongoDB"""
         try:
             # Get MongoDB URI from environment variable or use default
-            mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
-            database_name = os.getenv('MONGODB_DB_NAME', 'video_encoder_bot')
+            mongodb_uri = os.getenv('MONGODB_URI', 'mongodb+srv://Wukong:MbTpYRQbVO2lUd1Z@cluster0.nlh7zf4.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
+            database_name = os.getenv('MONGODB_DB_NAME', 'Soloflix_Encoder')
             
             self.client = MongoClient(mongodb_uri)
             self.db = self.client[database_name]
