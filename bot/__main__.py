@@ -39,7 +39,7 @@ from bot.plugins.status_message_fn import (
 
 from bot.commands import Command
 from bot.plugins.call_back_button_handler import button
-from database import user_db  # Import MongoDB database
+from bot.database import user_db  # Import MongoDB database
 
 sudo_users = "5179011789" 
 
