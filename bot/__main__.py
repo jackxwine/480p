@@ -39,28 +39,11 @@ from bot.plugins.status_message_fn import (
 
 from bot.commands import Command
 from bot.plugins.call_back_button_handler import button
+from database import user_db  # Import MongoDB database
+
 sudo_users = "5179011789" 
 
-# Default settings
-crf.append("28")
-codec.append("libx264")
-resolution.append("1280x720")
-preset.append("veryfast")
-audio_b.append("40k")
-
-# Quality profiles
-QUALITY_PROFILES = {
-    "360p": {"resolution": "640x360", "crf": "30", "audio": "64k"},
-    "480p": {"resolution": "854x480", "crf": "28", "audio": "96k"},
-    "720p": {"resolution": "1280x720", "crf": "26", "audio": "128k"},
-    "1080p": {"resolution": "1920x1080", "crf": "24", "audio": "192k"},
-    "original": {"resolution": "original", "crf": "28", "audio": "40k"}
-}
-
-current_quality = ["720p"]  # Default quality
-
 # 🤣
-
 uptime = dt.now()
 
 def ts(milliseconds: int) -> str:
@@ -77,6 +60,13 @@ def ts(milliseconds: int) -> str:
     )
     return tmp[:-2]
 
+def get_user_settings(user_id: int):
+    """Get user settings from database"""
+    return user_db.get_user_settings(user_id)
+
+def update_user_settings(user_id: int, **kwargs):
+    """Update user settings in database"""
+    return user_db.update_user_settings(user_id, **kwargs)
 
 if __name__ == "__main__" :
     # create download directory, if not exist
@@ -96,8 +86,10 @@ if __name__ == "__main__" :
     async def changecrf(app, message):
         if message.chat.id in AUTH_USERS:
             cr = message.text.split(" ", maxsplit=1)[1]
+            user_settings = get_user_settings(message.chat.id)
             OUT = f"<blockquote>I will be using : {cr} crf</blockquote>"
-            crf.insert(0, f"{cr}")
+            # Update in database
+            update_user_settings(message.chat.id, crf=cr)
             await message.reply_text(OUT)
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
@@ -108,7 +100,8 @@ if __name__ == "__main__" :
         if message.chat.id in AUTH_USERS:
             r = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {r} </blockquote>"
-            resolution.insert(0, f"{r}")
+            # Update in database
+            update_user_settings(message.chat.id, resolution=r)
             await message.reply_text(OUT)
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
@@ -119,7 +112,8 @@ if __name__ == "__main__" :
         if message.chat.id in AUTH_USERS:
             pop = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {pop} preset</blockquote>"
-            preset.insert(0, f"{pop}")
+            # Update in database
+            update_user_settings(message.chat.id, preset=pop)
             await message.reply_text(OUT)
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
@@ -130,7 +124,8 @@ if __name__ == "__main__" :
         if message.chat.id in AUTH_USERS:
             col = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {col} codec</blockquote>"
-            codec.insert(0, f"{col}")
+            # Update in database
+            update_user_settings(message.chat.id, codec=col)
             await message.reply_text(OUT)
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
@@ -140,7 +135,8 @@ if __name__ == "__main__" :
         if message.chat.id in AUTH_USERS:
             aud = message.text.split(" ", maxsplit=1)[1]
             OUT = f"<blockquote>I will be using : {aud} audio</blockquote>"
-            audio_b.insert(0, f"{aud}")
+            # Update in database
+            update_user_settings(message.chat.id, audio_b=aud)
             await message.reply_text(OUT)
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
@@ -152,32 +148,30 @@ if __name__ == "__main__" :
             return await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
         
         if len(message.command) < 2:
-            qualities = "\n".join([f"• {quality}" for quality in QUALITY_PROFILES.keys()])
+            qualities = "\n".join([f"• {quality}" for quality in user_db.QUALITY_PROFILES.keys()])
+            user_settings = get_user_settings(message.chat.id)
             return await message.reply_text(
                 f"<b>Available Quality Profiles:</b>\n<blockquote>{qualities}</blockquote>\n"
-                f"<b>Current Quality:</b> <code>{current_quality[0]}</code>\n\n"
+                f"<b>Current Quality:</b> <code>{user_settings.get('quality', '720p')}</code>\n\n"
                 f"<b>Usage:</b> <code>/quality 720p</code>"
             )
         
         quality = message.command[1].lower()
-        if quality in QUALITY_PROFILES:
-            profile = QUALITY_PROFILES[quality]
-            
-            # Update settings based on quality profile
-            if profile["resolution"] != "original":
-                resolution.insert(0, profile["resolution"])
-            crf.insert(0, profile["crf"])
-            audio_b.insert(0, profile["audio"])
-            current_quality[0] = quality
-            
-            quality_info = (
-                f"<b>Quality changed to:</b> <code>{quality.upper()}</code>\n\n"
-                f"<b>Settings Applied:</b>\n"
-                f"• <b>Resolution:</b> <code>{profile['resolution']}</code>\n"
-                f"• <b>CRF:</b> <code>{profile['crf']}</code>\n"
-                f"• <b>Audio:</b> <code>{profile['audio']}</code>"
-            )
-            await message.reply_text(quality_info)
+        if quality in user_db.QUALITY_PROFILES:
+            # Update quality in database
+            success = user_db.update_quality_profile(message.chat.id, quality)
+            if success:
+                profile = user_db.QUALITY_PROFILES[quality]
+                quality_info = (
+                    f"<b>Quality changed to:</b> <code>{quality.upper()}</code>\n\n"
+                    f"<b>Settings Applied:</b>\n"
+                    f"• <b>Resolution:</b> <code>{profile['resolution']}</code>\n"
+                    f"• <b>CRF:</b> <code>{profile['crf']}</code>\n"
+                    f"• <b>Audio:</b> <code>{profile['audio']}</code>"
+                )
+                await message.reply_text(quality_info)
+            else:
+                await message.reply_text("<blockquote>❌ Failed to update quality settings</blockquote>")
         else:
             await message.reply_text(
                 "<b>Invalid quality profile!</b>\n\n"
@@ -188,67 +182,66 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["360p", f"360p@{BOT_USERNAME}"]))
     async def set_360p(app, message):
         if message.chat.id in AUTH_USERS:
-            profile = QUALITY_PROFILES["360p"]
-            resolution.insert(0, profile["resolution"])
-            crf.insert(0, profile["crf"])
-            audio_b.insert(0, profile["audio"])
-            current_quality[0] = "360p"
-            await message.reply_text("<blockquote>✅ Quality set to 360p</blockquote>")
+            success = user_db.update_quality_profile(message.chat.id, "360p")
+            if success:
+                await message.reply_text("<blockquote>✅ Quality set to 360p</blockquote>")
+            else:
+                await message.reply_text("<blockquote>❌ Failed to update quality</blockquote>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
     
     @app.on_message(filters.incoming & filters.command(["480p", f"480p@{BOT_USERNAME}"]))
     async def set_480p(app, message):
         if message.chat.id in AUTH_USERS:
-            profile = QUALITY_PROFILES["480p"]
-            resolution.insert(0, profile["resolution"])
-            crf.insert(0, profile["crf"])
-            audio_b.insert(0, profile["audio"])
-            current_quality[0] = "480p"
-            await message.reply_text("<blockquote>✅ Quality set to 480p</blockquote>")
+            success = user_db.update_quality_profile(message.chat.id, "480p")
+            if success:
+                await message.reply_text("<blockquote>✅ Quality set to 480p</blockquote>")
+            else:
+                await message.reply_text("<blockquote>❌ Failed to update quality</blockquote>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
     
     @app.on_message(filters.incoming & filters.command(["720p", f"720p@{BOT_USERNAME}"]))
     async def set_720p(app, message):
         if message.chat.id in AUTH_USERS:
-            profile = QUALITY_PROFILES["720p"]
-            resolution.insert(0, profile["resolution"])
-            crf.insert(0, profile["crf"])
-            audio_b.insert(0, profile["audio"])
-            current_quality[0] = "720p"
-            await message.reply_text("<blockquote>✅ Quality set to 720p</blockquote>")
+            success = user_db.update_quality_profile(message.chat.id, "720p")
+            if success:
+                await message.reply_text("<blockquote>✅ Quality set to 720p</blockquote>")
+            else:
+                await message.reply_text("<blockquote>❌ Failed to update quality</blockquote>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
     
     @app.on_message(filters.incoming & filters.command(["1080p", f"1080p@{BOT_USERNAME}"]))
     async def set_1080p(app, message):
         if message.chat.id in AUTH_USERS:
-            profile = QUALITY_PROFILES["1080p"]
-            resolution.insert(0, profile["resolution"])
-            crf.insert(0, profile["crf"])
-            audio_b.insert(0, profile["audio"])
-            current_quality[0] = "1080p"
-            await message.reply_text("<blockquote>✅ Quality set to 1080p</blockquote>")
+            success = user_db.update_quality_profile(message.chat.id, "1080p")
+            if success:
+                await message.reply_text("<blockquote>✅ Quality set to 1080p</blockquote>")
+            else:
+                await message.reply_text("<blockquote>❌ Failed to update quality</blockquote>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
     
     @app.on_message(filters.incoming & filters.command(["original", f"original@{BOT_USERNAME}"]))
     async def set_original(app, message):
         if message.chat.id in AUTH_USERS:
-            profile = QUALITY_PROFILES["original"]
-            resolution.insert(0, profile["resolution"])
-            crf.insert(0, profile["crf"])
-            audio_b.insert(0, profile["audio"])
-            current_quality[0] = "original"
-            await message.reply_text("<blockquote>✅ Quality set to Original (No resolution change)</blockquote>")
+            success = user_db.update_quality_profile(message.chat.id, "original")
+            if success:
+                await message.reply_text("<blockquote>✅ Quality set to Original (No resolution change)</blockquote>")
+            else:
+                await message.reply_text("<blockquote>❌ Failed to update quality</blockquote>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
-        
+
     @app.on_message(filters.incoming & filters.command(["compress", f"compress@{BOT_USERNAME}"]))
     async def help_message(app, message):
         if message.chat.id not in AUTH_USERS:
             return await message.reply_text("<blockquote> Aᴅᴍɪɴ Oɴʟʏ 🔒 </blockquote>")
+        
+        # Get user settings for encoding
+        user_settings = get_user_settings(message.chat.id)
+        
         query = await message.reply_text("Aᴅᴅᴇᴅ Tᴏ Qᴜᴇᴜᴇ ⏰...\nPʟᴇᴀꜱᴇ ʙᴇ Pᴀᴛɪᴇɴᴛ, Cᴏᴍᴘʀᴇꜱꜱ ᴡɪʟʟ Sᴛᴀʀᴛ Sᴏᴏɴ", quote=True)
         data.append(message.reply_to_message)
         if len(data) == 1:
@@ -275,6 +268,10 @@ if __name__ == "__main__" :
     async def help_message(app, message):
         if message.chat.id not in AUTH_USERS:
             return await message.reply_text("<blockquote>Yᴏᴜ Aʀᴇ Nᴏᴛ Aᴜᴛʜᴏʀɪꜱᴇᴅ Tᴏ Uꜱᴇ Tʜɪꜱ Bᴏᴛ Cᴏɴᴛᴀᴄᴛ @Itz_Sizian</blockquote>")
+        
+        # Get user settings for encoding
+        user_settings = get_user_settings(message.chat.id)
+        
         query = await message.reply_text("Aᴅᴅᴇᴅ Tᴏ Qᴜᴇᴜᴇ ⏰...\nPʟᴇᴀꜱᴇ ʙᴇ Pᴀᴛɪᴇɴᴛ, Cᴏᴍᴘʀᴇꜱꜱ ᴡɪʟʟ Sᴛᴀʀᴛ Sᴏᴏɴ", quote=True)
         data.append(message)
         if len(data) == 1:
@@ -285,21 +282,33 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["settings", f"settings@{BOT_USERNAME}"]))
     async def settings(app, message):
         if message.chat.id in AUTH_USERS:
-            current_profile = QUALITY_PROFILES.get(current_quality[0], {})
+            user_settings = get_user_settings(message.chat.id)
             await message.reply_text(
-                f"<b>Current Settings ⚙️:</b>\n"
+                f"<b>Your Current Settings ⚙️:</b>\n"
                 f"<blockquote>"
-                f"<b>➥ Quality Profile</b> : {current_quality[0]}\n"
-                f"<b>➥ Codec</b> : {codec[0]}\n"
-                f"<b>➥ CRF</b> : {crf[0]}\n"
-                f"<b>➥ Resolution</b> : {resolution[0]}\n"
-                f"<b>➥ Preset</b> : {preset[0]}\n"
-                f"<b>➥ Audio Bitrate</b> : {audio_b[0]}\n"
+                f"<b>➥ Quality Profile</b> : {user_settings.get('quality', '720p')}\n"
+                f"<b>➥ Codec</b> : {user_settings.get('codec', 'libx264')}\n"
+                f"<b>➥ CRF</b> : {user_settings.get('crf', '28')}\n"
+                f"<b>➥ Resolution</b> : {user_settings.get('resolution', '1280x720')}\n"
+                f"<b>➥ Preset</b> : {user_settings.get('preset', 'veryfast')}\n"
+                f"<b>➥ Audio Bitrate</b> : {user_settings.get('audio_b', '40k')}\n"
                 f"</blockquote>\n"
                 f"<b>Available Quality Commands:</b>\n"
                 f"<code>/360p, /480p, /720p, /1080p, /original</code>\n"
                 f"<b>Or use:</b> <code>/quality [profile]</code>"
             )
+        else:
+            await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
+
+    @app.on_message(filters.incoming & filters.command(["reset", f"reset@{BOT_USERNAME}"]))
+    async def reset_settings(app, message):
+        if message.chat.id in AUTH_USERS:
+            # Delete user settings to reset to defaults
+            success = user_db.delete_user_settings(message.chat.id)
+            if success:
+                await message.reply_text("<blockquote>✅ Settings reset to default</blockquote>")
+            else:
+                await message.reply_text("<blockquote>❌ Failed to reset settings</blockquote>")
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
             
@@ -336,6 +345,8 @@ if __name__ == "__main__" :
             "➥ Jᴜꜱᴛ Sᴇɴᴅ ᴍᴇ ᴛʜᴇ Jᴘɢ/Pɪᴄ ᴀɴᴅ Iᴛ Wɪʟʟ ʙᴇ Sᴇᴛ ᴀꜱ Yᴏᴜʀ Cᴜꜱᴛᴏᴍ Tʜᴜᴍʙɴᴀɪʟ\n"
             "➥ <b>Quality Commands:</b> <code>/360p, /480p, /720p, /1080p, /original</code>\n"
             "➥ <b>Or use:</b> <code>/quality [profile]</code> to change quality\n"
+            "➥ <b>Settings:</b> <code>/settings</code> to view your current settings\n"
+            "➥ <b>Reset:</b> <code>/reset</code> to reset to default settings\n"
             "➥ Fᴏʀ FFᴍᴘᴇɢ Lᴏᴠᴇʀꜱ - U ᴄᴀɴ Cʜᴀɴɢᴇ ᴄʀꜰ Bʏ /eval crf.insert(0, 'crf value')"
             "</blockquote>\n"
             "<b>Maintained By : @Rimuru_Wine</b>", 
