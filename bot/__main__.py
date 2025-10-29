@@ -29,6 +29,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from bot.plugins.incoming_message_fn import (
+    incoming_start_message_f,
+    incoming_compress_message_f,
+    incoming_cancel_message_f
+)
+
 # 🤣
 uptime = dt.now()
 
@@ -193,7 +199,7 @@ if __name__ == "__main__" :
 
     # START command
     incoming_start_message_handler = MessageHandler(
-        incoming_start_message_fn,
+        incoming_start_message_f,
         filters=filters.command(["start", f"start@{BOT_USERNAME}"])
     )
     app.add_handler(incoming_start_message_handler)
