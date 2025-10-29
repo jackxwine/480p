@@ -1,5 +1,5 @@
 from datetime import datetime as dt
-import os, asyncio, pyrogram, psutil, platform
+import os, asyncio, pyrogram, psutil, platform, time
 from bot import (
     APP_ID,
     API_HASH,
@@ -24,21 +24,6 @@ from pyrogram import Client, filters
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from pyrogram.types import Message
 from psutil import disk_usage, cpu_percent, virtual_memory, Process as psprocess
-from bot.database import mongo db
-from bot.plugins.incoming_message_fn import (
-    incoming_start_message_f,
-    incoming_compress_message_f,
-    incoming_cancel_message_f
-)
-
-from bot.plugins.status_message_fn import (
-    eval_message_f,
-    exec_message_f,
-    upload_log_file
-)
-
-from bot.commands import Command
-from bot.plugins.call_back_button_handler import button
 from bot.database import user_db  # Import MongoDB database
 import logging
 
@@ -64,7 +49,7 @@ def ts(milliseconds: int) -> str:
 def get_user_settings(user_id: int):
     """Get user settings from database with fallback"""
     try:
-        if user_db is None:
+        if user_db is None or not user_db.is_ready():
             logger.error("Database not initialized")
             return user_db._create_default_settings(user_id)
         return user_db.get_user_settings(user_id)
@@ -75,7 +60,7 @@ def get_user_settings(user_id: int):
 def update_user_settings(user_id: int, **kwargs):
     """Update user settings in database with error handling"""
     try:
-        if user_db is None:
+        if user_db is None or not user_db.is_ready():
             logger.error("Database not initialized")
             return False
         return user_db.update_user_settings(user_id, **kwargs)
@@ -95,7 +80,8 @@ def get_encoding_settings(user_id: int):
             'resolution': settings.get('resolution', '1280x720'),
             'preset': settings.get('preset', 'veryfast'),
             'audio_b': settings.get('audio_b', '40k'),
-            'quality': settings.get('quality', '720p')
+            'quality': settings.get('quality', '720p'),
+            'user_id': user_id  # Track which user's settings are being used
         }
         
         return encoding_settings
@@ -108,8 +94,76 @@ def get_encoding_settings(user_id: int):
             'resolution': '1280x720',
             'preset': 'veryfast',
             'audio_b': '40k',
-            'quality': '720p'
+            'quality': '720p',
+            'user_id': user_id
         }
+
+def safe_update_quality(user_id: int, quality: str) -> bool:
+    """Safely update quality profile with proper error handling"""
+    try:
+        if user_db is None or not user_db.is_ready():
+            logger.error("Database not available for quality update")
+            return False
+        return user_db.update_quality_profile(user_id, quality)
+    except Exception as e:
+        logger.error(f"Error updating quality for {user_id}: {e}")
+        return False
+
+def log_encoding_activity(user_id: int, file_info: dict, settings_used: dict, status: str):
+    """Log encoding activity to database"""
+    try:
+        if user_db.is_ready():
+            # Create activity log entry
+            activity_data = {
+                'user_id': user_id,
+                'timestamp': dt.utcnow(),
+                'activity_type': 'encoding',
+                'status': status,
+                'file_info': file_info,
+                'settings_used': settings_used
+            }
+            
+            # Store in a separate collection for activity logs
+            activity_collection = user_db.mongo.get_collection('encoding_activities')
+            activity_collection.insert_one(activity_data)
+            logger.debug(f"Activity logged for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error logging activity: {e}")
+
+def get_user_encoding_stats(user_id: int) -> dict:
+    """Get user encoding statistics"""
+    try:
+        if user_db.is_ready():
+            activity_collection = user_db.mongo.get_collection('encoding_activities')
+            
+            # Count total encodings
+            total_encodings = activity_collection.count_documents({
+                'user_id': user_id, 
+                'activity_type': 'encoding'
+            })
+            
+            # Count successful encodings
+            successful_encodings = activity_collection.count_documents({
+                'user_id': user_id, 
+                'activity_type': 'encoding',
+                'status': 'completed'
+            })
+            
+            # Get last encoding time
+            last_encoding = activity_collection.find_one({
+                'user_id': user_id,
+                'activity_type': 'encoding'
+            }, sort=[('timestamp', -1)])
+            
+            return {
+                'total_encodings': total_encodings,
+                'successful_encodings': successful_encodings,
+                'last_encoding_time': last_encoding.get('timestamp') if last_encoding else None
+            }
+    except Exception as e:
+        logger.error(f"Error getting user encoding stats: {e}")
+    
+    return {'total_encodings': 0, 'successful_encodings': 0, 'last_encoding_time': None}
 
 if __name__ == "__main__" :
     # create download directory, if not exist
@@ -118,10 +172,20 @@ if __name__ == "__main__" :
     
     # Initialize database connection
     try:
-        if user_db is None:
+        if user_db is None or not user_db.is_ready():
             logger.error("❌ Database connection failed - using default settings")
         else:
             logger.info("✅ Database connection established successfully")
+            
+            # Log bot startup in database
+            if user_db.is_ready():
+                activity_collection = user_db.mongo.get_collection('bot_activities')
+                activity_collection.insert_one({
+                    'event': 'bot_startup',
+                    'timestamp': dt.utcnow(),
+                    'uptime': uptime,
+                    'total_users': user_db.get_users_count()
+                })
     except Exception as e:
         logger.error(f"❌ Database initialization error: {e}")
 
@@ -154,6 +218,14 @@ if __name__ == "__main__" :
         success = update_user_settings(message.chat.id, crf=cr)
         if not success:
             OUT = "<blockquote>❌ Failed to update CRF</blockquote>"
+        else:
+            # Log setting change
+            log_encoding_activity(
+                message.chat.id,
+                {'action': 'setting_change', 'setting': 'crf', 'value': cr},
+                get_user_settings(message.chat.id),
+                'setting_updated'
+            )
             
         await message.reply_text(OUT)
 
@@ -177,6 +249,14 @@ if __name__ == "__main__" :
         success = update_user_settings(message.chat.id, resolution=r)
         if not success:
             OUT = "<blockquote>❌ Failed to update resolution</blockquote>"
+        else:
+            # Log setting change
+            log_encoding_activity(
+                message.chat.id,
+                {'action': 'setting_change', 'setting': 'resolution', 'value': r},
+                get_user_settings(message.chat.id),
+                'setting_updated'
+            )
             
         await message.reply_text(OUT)
 
@@ -200,6 +280,14 @@ if __name__ == "__main__" :
         success = update_user_settings(message.chat.id, preset=pop)
         if not success:
             OUT = "<blockquote>❌ Failed to update preset</blockquote>"
+        else:
+            # Log setting change
+            log_encoding_activity(
+                message.chat.id,
+                {'action': 'setting_change', 'setting': 'preset', 'value': pop},
+                get_user_settings(message.chat.id),
+                'setting_updated'
+            )
             
         await message.reply_text(OUT)
 
@@ -223,6 +311,14 @@ if __name__ == "__main__" :
         success = update_user_settings(message.chat.id, codec=col)
         if not success:
             OUT = "<blockquote>❌ Failed to update codec</blockquote>"
+        else:
+            # Log setting change
+            log_encoding_activity(
+                message.chat.id,
+                {'action': 'setting_change', 'setting': 'codec', 'value': col},
+                get_user_settings(message.chat.id),
+                'setting_updated'
+            )
             
         await message.reply_text(OUT)
 
@@ -246,6 +342,14 @@ if __name__ == "__main__" :
         success = update_user_settings(message.chat.id, audio_b=aud)
         if not success:
             OUT = "<blockquote>❌ Failed to update audio bitrate</blockquote>"
+        else:
+            # Log setting change
+            log_encoding_activity(
+                message.chat.id,
+                {'action': 'setting_change', 'setting': 'audio_b', 'value': aud},
+                get_user_settings(message.chat.id),
+                'setting_updated'
+            )
             
         await message.reply_text(OUT)
     
@@ -267,7 +371,7 @@ if __name__ == "__main__" :
         quality = message.command[1].lower()
         if quality in user_db.QUALITY_PROFILES:
             # Update quality in database
-            success = user_db.update_quality_profile(message.chat.id, quality)
+            success = safe_update_quality(message.chat.id, quality)
             if success:
                 profile = user_db.QUALITY_PROFILES[quality]
                 quality_info = (
@@ -277,6 +381,15 @@ if __name__ == "__main__" :
                     f"• <b>CRF:</b> <code>{profile['crf']}</code>\n"
                     f"• <b>Audio:</b> <code>{profile['audio']}</code>"
                 )
+                
+                # Log quality change
+                log_encoding_activity(
+                    message.chat.id,
+                    {'action': 'quality_change', 'quality': quality, 'profile': profile},
+                    get_user_settings(message.chat.id),
+                    'quality_updated'
+                )
+                
                 await message.reply_text(quality_info)
             else:
                 await message.reply_text("<blockquote>❌ Failed to update quality settings</blockquote>")
@@ -290,7 +403,7 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["360p", f"360p@{BOT_USERNAME}"]))
     async def set_360p(app, message):
         if message.chat.id in AUTH_USERS:
-            success = user_db.update_quality_profile(message.chat.id, "360p")
+            success = safe_update_quality(message.chat.id, "360p")
             if success:
                 await message.reply_text("<blockquote>✅ Quality set to 360p</blockquote>")
             else:
@@ -301,7 +414,7 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["480p", f"480p@{BOT_USERNAME}"]))
     async def set_480p(app, message):
         if message.chat.id in AUTH_USERS:
-            success = user_db.update_quality_profile(message.chat.id, "480p")
+            success = safe_update_quality(message.chat.id, "480p")
             if success:
                 await message.reply_text("<blockquote>✅ Quality set to 480p</blockquote>")
             else:
@@ -312,7 +425,7 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["720p", f"720p@{BOT_USERNAME}"]))
     async def set_720p(app, message):
         if message.chat.id in AUTH_USERS:
-            success = user_db.update_quality_profile(message.chat.id, "720p")
+            success = safe_update_quality(message.chat.id, "720p")
             if success:
                 await message.reply_text("<blockquote>✅ Quality set to 720p</blockquote>")
             else:
@@ -323,7 +436,7 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["1080p", f"1080p@{BOT_USERNAME}"]))
     async def set_1080p(app, message):
         if message.chat.id in AUTH_USERS:
-            success = user_db.update_quality_profile(message.chat.id, "1080p")
+            success = safe_update_quality(message.chat.id, "1080p")
             if success:
                 await message.reply_text("<blockquote>✅ Quality set to 1080p</blockquote>")
             else:
@@ -334,7 +447,7 @@ if __name__ == "__main__" :
     @app.on_message(filters.incoming & filters.command(["original", f"original@{BOT_USERNAME}"]))
     async def set_original(app, message):
         if message.chat.id in AUTH_USERS:
-            success = user_db.update_quality_profile(message.chat.id, "original")
+            success = safe_update_quality(message.chat.id, "original")
             if success:
                 await message.reply_text("<blockquote>✅ Quality set to Original (No resolution change)</blockquote>")
             else:
@@ -353,12 +466,34 @@ if __name__ == "__main__" :
         query = await message.reply_text("Aᴅᴅᴇᴅ Tᴏ Qᴜᴇᴜᴇ ⏰...\nPʟᴇᴀꜱᴇ ʙᴇ Pᴀᴛɪᴇɴᴛ, Cᴏᴍᴘʀᴇꜱꜱ ᴡɪʟʟ Sᴛᴀʀᴛ Sᴏᴏɴ", quote=True)
         data.append(message.reply_to_message)
         if len(data) == 1:
-         await query.delete()   
-         await add_task(message.reply_to_message, user_settings)     
+            await query.delete()   
+            
+            # Log encoding start
+            file_info = {
+                'file_id': message.reply_to_message.id,
+                'file_type': 'video' if message.reply_to_message.video else 'document',
+                'timestamp': dt.utcnow()
+            }
+            log_encoding_activity(
+                message.chat.id,
+                file_info,
+                user_settings,
+                'encoding_started'
+            )
+            
+            await add_task(message.reply_to_message, user_settings)     
  
     @app.on_message(filters.incoming & filters.command(["restart", f"restart@{BOT_USERNAME}"]))
     async def restarter(app, message):
         if message.chat.id in AUTH_USERS:
+            # Log restart event
+            if user_db.is_ready():
+                activity_collection = user_db.mongo.get_collection('bot_activities')
+                activity_collection.insert_one({
+                    'event': 'bot_restart',
+                    'timestamp': dt.utcnow(),
+                    'initiated_by': message.chat.id
+                })
             await message.reply_text("Rᴇꜱᴛᴀʀᴛɪɴɢ...♻️")
             quit(1)
         else:
@@ -369,6 +504,17 @@ if __name__ == "__main__" :
         data.clear()
         if message.chat.id not in AUTH_USERS:
             return await message.reply_text("<blockquote>Yᴏᴜ Aʀᴇ Nᴏᴛ Aᴜᴛʜᴏʀɪꜱᴇᴅ Tᴏ Uꜱᴇ Tʜɪꜱ Bᴏᴛ Cᴏɴᴛᴀᴄᴛ @Lord_Vasudev_Krishna</blockquote>")
+        
+        # Log queue clear
+        if user_db.is_ready():
+            activity_collection = user_db.mongo.get_collection('bot_activities')
+            activity_collection.insert_one({
+                'event': 'queue_cleared',
+                'timestamp': dt.utcnow(),
+                'cleared_by': message.chat.id,
+                'queue_size_before': len(data)
+            })
+            
         query = await message.reply_text("<blockquote>Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ Cʟᴇᴀʀᴇᴅ Qᴜᴇᴜᴇ...📚</blockquote>")
       
         
@@ -383,14 +529,43 @@ if __name__ == "__main__" :
         query = await message.reply_text("Aᴅᴅᴇᴅ Tᴏ Qᴜᴇᴜᴇ ⏰...\nPʟᴇᴀꜱᴇ ʙᴇ Pᴀᴛɪᴇɴᴛ, Cᴏᴍᴘʀᴇꜱꜱ ᴡɪʟʟ Sᴛᴀʀᴛ Sᴏᴏɴ", quote=True)
         data.append(message)
         if len(data) == 1:
-         await query.delete()   
-         await add_task(message, user_settings)
+            await query.delete()   
+            
+            # Log encoding start
+            file_info = {
+                'file_id': message.id,
+                'file_type': 'video' if message.video else 'document',
+                'file_name': getattr(message.video or message.document, 'file_name', 'Unknown'),
+                'file_size': getattr(message.video or message.document, 'file_size', 0),
+                'timestamp': dt.utcnow()
+            }
+            log_encoding_activity(
+                message.chat.id,
+                file_info,
+                user_settings,
+                'encoding_started'
+            )
+            
+            await add_task(message, user_settings)
             
 
     @app.on_message(filters.incoming & filters.command(["settings", f"settings@{BOT_USERNAME}"]))
     async def settings(app, message):
         if message.chat.id in AUTH_USERS:
             user_settings = get_user_settings(message.chat.id)
+            encoding_stats = get_user_encoding_stats(message.chat.id)
+            
+            stats_text = ""
+            if encoding_stats['total_encodings'] > 0:
+                stats_text = (
+                    f"\n<b>📊 Your Encoding Stats:</b>\n"
+                    f"<blockquote>"
+                    f"• <b>Total Encodings:</b> {encoding_stats['total_encodings']}\n"
+                    f"• <b>Successful:</b> {encoding_stats['successful_encodings']}\n"
+                    f"• <b>Last Activity:</b> {encoding_stats['last_encoding_time'] or 'Never'}\n"
+                    f"</blockquote>"
+                )
+            
             await message.reply_text(
                 f"<b>Your Current Settings ⚙️:</b>\n"
                 f"<blockquote>"
@@ -401,6 +576,7 @@ if __name__ == "__main__" :
                 f"<b>➥ Preset</b> : {user_settings.get('preset', 'veryfast')}\n"
                 f"<b>➥ Audio Bitrate</b> : {user_settings.get('audio_b', '40k')}\n"
                 f"</blockquote>\n"
+                f"{stats_text}\n"
                 f"<b>Available Quality Commands:</b>\n"
                 f"<code>/360p, /480p, /720p, /1080p, /original</code>\n"
                 f"<b>Or use:</b> <code>/quality [profile]</code>"
@@ -414,6 +590,13 @@ if __name__ == "__main__" :
             # Delete user settings to reset to defaults
             success = user_db.delete_user_settings(message.chat.id)
             if success:
+                # Log reset activity
+                log_encoding_activity(
+                    message.chat.id,
+                    {'action': 'settings_reset'},
+                    user_db.DEFAULT_SETTINGS,
+                    'settings_reset'
+                )
                 await message.reply_text("<blockquote>✅ Settings reset to default</blockquote>")
             else:
                 await message.reply_text("<blockquote>❌ Failed to reset settings</blockquote>")
@@ -427,10 +610,20 @@ if __name__ == "__main__" :
                 # Get user stats from database
                 user_stats = user_db.get_user_stats(message.chat.id)
                 total_users = user_db.get_users_count()
+                encoding_stats = get_user_encoding_stats(message.chat.id)
+                
+                # Get bot activities count
+                if user_db.is_ready():
+                    activity_collection = user_db.mongo.get_collection('bot_activities')
+                    total_encodings = activity_collection.count_documents({'event': 'encoding_completed'})
+                else:
+                    total_encodings = 0
                 
                 stats_text = (
                     f"<b>📊 Bot Statistics</b>\n\n"
-                    f"<b>Total Users:</b> <code>{total_users}</code>\n"
+                    f"<b>🤖 Bot Uptime:</b> <code>{ts(int((dt.now() - uptime).seconds * 1000))}</code>\n"
+                    f"<b>👥 Total Users:</b> <code>{total_users}</code>\n"
+                    f"<b>📁 Total Encodings:</b> <code>{total_encodings}</code>\n"
                 )
                 
                 if user_stats:
@@ -438,8 +631,11 @@ if __name__ == "__main__" :
                     updated_at = user_stats.get('updated_at', 'N/A')
                     
                     stats_text += (
-                        f"<b>Your Settings Created:</b> <code>{created_at}</code>\n"
+                        f"\n<b>👤 Your Stats:</b>\n"
+                        f"<b>Settings Created:</b> <code>{created_at}</code>\n"
                         f"<b>Last Updated:</b> <code>{updated_at}</code>\n"
+                        f"<b>Your Encodings:</b> <code>{encoding_stats['total_encodings']}</code>\n"
+                        f"<b>Successful:</b> <code>{encoding_stats['successful_encodings']}</code>"
                     )
                 
                 await message.reply_text(stats_text)
@@ -485,6 +681,7 @@ if __name__ == "__main__" :
             "➥ <b>Settings:</b> <code>/settings</code> to view your current settings\n"
             "➥ <b>Reset:</b> <code>/reset</code> to reset to default settings\n"
             "➥ <b>Stats:</b> <code>/stats</code> to view bot statistics\n"
+            "➥ <b>Encoding Stats:</b> View your personal encoding history\n"
             "➥ Fᴏʀ FFᴍᴘᴇɢ Lᴏᴠᴇʀꜱ - U ᴄᴀɴ Cʜᴀɴɢᴇ ᴄʀꜰ Bʏ /eval crf.insert(0, 'crf value')"
             "</blockquote>\n"
             "<b>Maintained By : @Rimuru_Wine</b>", 
@@ -504,6 +701,37 @@ if __name__ == "__main__" :
       ms = (ed - stt).microseconds / 1000
       p = f"Pɪɴɢ = {ms}ms 🌋</blockquote>"
       await message.reply_text(u + "\n" + p)
+
+    # New command: View encoding history
+    @app.on_message(filters.incoming & filters.command(["history", f"history@{BOT_USERNAME}"]))
+    async def encoding_history(app, message):
+        if message.chat.id not in AUTH_USERS:
+            return await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
+        
+        try:
+            if user_db.is_ready():
+                activity_collection = user_db.mongo.get_collection('encoding_activities')
+                recent_activities = activity_collection.find(
+                    {'user_id': message.chat.id, 'activity_type': 'encoding'}
+                ).sort('timestamp', -1).limit(10)
+                
+                activities_list = list(recent_activities)
+                if activities_list:
+                    history_text = "<b>📜 Your Recent Encoding Activities:</b>\n\n"
+                    for activity in activities_list:
+                        status_emoji = "✅" if activity.get('status') == 'completed' else "⏳" if activity.get('status') == 'encoding_started' else "❌"
+                        history_text += (
+                            f"{status_emoji} <b>{activity.get('timestamp', 'Unknown').strftime('%Y-%m-%d %H:%M')}</b> - "
+                            f"{activity.get('status', 'unknown').replace('_', ' ').title()}\n"
+                        )
+                    await message.reply_text(history_text)
+                else:
+                    await message.reply_text("<blockquote>No encoding history found.</blockquote>")
+            else:
+                await message.reply_text("<blockquote>Database not available.</blockquote>")
+        except Exception as e:
+            logger.error(f"Error getting encoding history: {e}")
+            await message.reply_text("<blockquote>❌ Error retrieving history</blockquote>")
 
     call_back_button_handler = CallbackQueryHandler(
         button
