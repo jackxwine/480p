@@ -4,6 +4,8 @@ from pymongo.errors import ConnectionFailure, OperationFailure
 import logging
 from typing import Dict, Optional, Any, List
 from bson import ObjectId
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 
