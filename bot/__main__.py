@@ -449,7 +449,7 @@ if __name__ == "__main__" :
         else:
             await message.reply_text("<blockquote>Aᴅᴍɪɴ Oɴʟʏ 🔒</blockquote>")
             
-@app.on_message(filters.incoming & filters.command(["sysinfo", f"sysinfo@{BOT_USERNAME}"]))
+    @app.on_message(filters.incoming & filters.command(["sysinfo", f"sysinfo@{BOT_USERNAME}"]))
     async def help_message(app, message):
         if message.chat.id in AUTH_USERS:
             await sysinfo(message)
