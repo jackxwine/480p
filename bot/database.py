@@ -52,15 +52,23 @@ class MongoDB:
             
         except ServerSelectionTimeoutError as e:
             logger.error(f"❌ MongoDB server selection timeout: {e}")
+            self.client = None
+            self.db = None
             raise
         except ConnectionFailure as e:
             logger.error(f"❌ Failed to connect to MongoDB: {e}")
+            self.client = None
+            self.db = None
             raise
         except OperationFailure as e:
             logger.error(f"❌ MongoDB operation failed: {e}")
+            self.client = None
+            self.db = None
             raise
         except Exception as e:
             logger.error(f"❌ Unexpected error connecting to MongoDB: {e}")
+            self.client = None
+            self.db = None
             raise
 
     def get_collection(self, collection_name: str):
@@ -83,6 +91,7 @@ class UserSettingsDB:
     def __init__(self):
         self.mongo = None
         self.collection = None
+        self._is_initialized = False
         self._initialize_database()
 
     def _initialize_database(self):
@@ -91,9 +100,11 @@ class UserSettingsDB:
             self.mongo = MongoDB()
             self.collection = self.mongo.get_collection('user_settings')
             self._ensure_indexes()
+            self._is_initialized = True
             logger.info("✅ UserSettingsDB initialized successfully")
         except Exception as e:
             logger.error(f"❌ Failed to initialize UserSettingsDB: {e}")
+            self._is_initialized = False
             raise
 
     def _ensure_indexes(self):
@@ -127,9 +138,17 @@ class UserSettingsDB:
 
     def _check_connection(self):
         """Check and reestablish connection if needed"""
-        if not self.mongo or not self.mongo.is_connected():
+        if not self._is_initialized or not self.mongo or not self.mongo.is_connected():
             logger.warning("Database connection lost, reconnecting...")
-            self._initialize_database()
+            try:
+                self._initialize_database()
+            except Exception as e:
+                logger.error(f"❌ Failed to reconnect: {e}")
+                raise ConnectionError("Database connection unavailable")
+
+    def is_ready(self) -> bool:
+        """Check if database is ready to use"""
+        return self._is_initialized and self.mongo and self.mongo.is_connected()
 
     def get_user_settings(self, user_id: int) -> Dict[str, Any]:
         """Get user settings from database"""
@@ -164,7 +183,11 @@ class UserSettingsDB:
 
     def update_user_settings(self, user_id: int, **kwargs) -> bool:
         """Update user settings in database"""
-        self._check_connection()
+        try:
+            self._check_connection()
+        except ConnectionError:
+            logger.error("❌ Cannot update settings - database connection unavailable")
+            return False
         
         try:
             # Prepare update data
@@ -200,6 +223,10 @@ class UserSettingsDB:
 
     def update_quality_profile(self, user_id: int, quality: str) -> bool:
         """Update user settings based on quality profile"""
+        if not self.is_ready():
+            logger.error("❌ Database not ready, cannot update quality profile")
+            return False
+            
         if quality not in self.QUALITY_PROFILES:
             logger.error(f"❌ Invalid quality profile: {quality}")
             return False
@@ -225,8 +252,12 @@ class UserSettingsDB:
 
     def delete_user_settings(self, user_id: int) -> bool:
         """Delete user settings from database"""
-        self._check_connection()
-        
+        try:
+            self._check_connection()
+        except ConnectionError:
+            logger.error("❌ Cannot delete settings - database connection unavailable")
+            return False
+            
         try:
             result = self.collection.delete_one({"user_id": user_id})
             if result.deleted_count > 0:
@@ -241,8 +272,12 @@ class UserSettingsDB:
 
     def get_all_users(self) -> List[int]:
         """Get all user IDs from database"""
-        self._check_connection()
-        
+        try:
+            self._check_connection()
+        except ConnectionError:
+            logger.error("❌ Cannot get users - database connection unavailable")
+            return []
+            
         try:
             users = self.collection.find({}, {"user_id": 1})
             user_ids = [user['user_id'] for user in users]
@@ -255,8 +290,12 @@ class UserSettingsDB:
 
     def get_users_count(self) -> int:
         """Get total number of users in database"""
-        self._check_connection()
-        
+        try:
+            self._check_connection()
+        except ConnectionError:
+            logger.error("❌ Cannot get users count - database connection unavailable")
+            return 0
+            
         try:
             count = self.collection.count_documents({})
             logger.debug(f"Total users in database: {count}")
@@ -267,8 +306,12 @@ class UserSettingsDB:
 
     def get_user_stats(self, user_id: int) -> Dict[str, Any]:
         """Get user statistics and settings"""
-        self._check_connection()
-        
+        try:
+            self._check_connection()
+        except ConnectionError:
+            logger.error("❌ Cannot get user stats - database connection unavailable")
+            return {}
+            
         try:
             settings = self.collection.find_one(
                 {"user_id": user_id},
@@ -303,7 +346,48 @@ class UserSettingsDB:
         """Close MongoDB connection"""
         if self.mongo and self.mongo.client:
             self.mongo.client.close()
+            self._is_initialized = False
             logger.info("✅ MongoDB connection closed")
+
+# Safe global instance with fallback
+class SafeUserSettingsDB:
+    """Wrapper that safely handles database operations even when connection fails"""
+    
+    def __init__(self):
+        self._db = None
+        self._initialize()
+    
+    def _initialize(self):
+        """Initialize database with error handling"""
+        try:
+            self._db = UserSettingsDB()
+            logger.info("✅ UserSettingsDB instance created successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to create UserSettingsDB instance: {e}")
+            self._db = None
+    
+    def __getattr__(self, name):
+        """Delegate method calls to the database instance with safety checks"""
+        if self._db is None:
+            def method(*args, **kwargs):
+                logger.error(f"❌ Database not available, cannot call {name}")
+                return None
+            return method
+        return getattr(self._db, name)
+    
+    def is_ready(self) -> bool:
+        """Check if database is ready"""
+        return self._db is not None and self._db.is_ready()
+    
+    def update_quality_profile(self, user_id: int, quality: str) -> bool:
+        """Safe quality profile update"""
+        if not self.is_ready():
+            logger.error("❌ Database not available, cannot update quality profile")
+            return False
+        return self._db.update_quality_profile(user_id, quality)
+
+# Global instance with safe fallback
+user_db = SafeUserSettingsDB()
 
 # Test function to verify everything works
 def test_database_connection():
@@ -339,13 +423,14 @@ def test_database_connection():
     except Exception as e:
         logger.error(f"❌ Test failed: {e}")
 
-# Global instance with error handling
-try:
-    user_db = UserSettingsDB()
-    logger.info("✅ Global UserSettingsDB instance created successfully")
-except Exception as e:
-    logger.error(f"❌ Failed to create global UserSettingsDB instance: {e}")
-    user_db = None
+# Safe usage example
+def safe_update_quality(user_id: int, quality: str):
+    """Safely update quality profile with proper error handling"""
+    if user_db.is_ready():
+        return user_db.update_quality_profile(user_id, quality)
+    else:
+        logger.error("❌ Cannot update quality profile - database not available")
+        return False
 
 # Run tests if this file is executed directly
 if __name__ == "__main__":
